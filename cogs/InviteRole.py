@@ -108,12 +108,6 @@ class InviteRole(commands.Cog):
                 await ctx.reply(f'付与する役職を {before_role.name} から {role.name} に変更しました',
                                 allowed_mentions=discord.AllowedMentions.none())
 
-    @commands.command()
-    async def invite(self, ctx):
-        """Botの招待リンクを表示します"""
-        return await ctx.reply('https://discord.com/api/oauth2/authorize?client_id=883187744984162305&permissions=268528689&scope=bot',
-                               allowed_mentions=discord.AllowedMentions.none())
-
 
 def setup(bot):
     bot.add_cog(InviteRole(bot))
