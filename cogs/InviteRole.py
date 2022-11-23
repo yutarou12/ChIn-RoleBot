@@ -1,6 +1,8 @@
 from typing import Optional
 
 import discord
+from discord import app_commands
+from discord.app_commands import Choice, Group
 from discord.ext import commands
 
 
@@ -9,105 +11,142 @@ class InviteRole(commands.Cog):
         self.bot = bot
         self.db = self.bot.db
 
-    @commands.command()
-    @commands.has_permissions(administrator=True)
-    async def list(self, ctx):
+    @app_commands.guild_only()
+    class MyGroup(app_commands.Group):
+        pass
+
+    role_group = MyGroup(name='role', description='役職の自動付与に関するコマンドです')
+
+    @app_commands.command(name='list')
+    @app_commands.checks.has_permissions(administrator=True)
+    async def list(self, interaction: discord.Interaction):
         """サーバーに設定されている自動付与役職を一覧に出します"""
-        data = self.db.all_invite_role(ctx.guild.id)
+        data = self.db.all_invite_role(interaction.guild.id)
         if not data:
-            return await ctx.reply('役職自動付与の招待リンクは設定されていません',
-                                   allowed_mentions=discord.AllowedMentions.none())
+            return await interaction.response.send_message('役職自動付与の招待リンクは設定されていません', ephemeral=True)
         else:
             text = []
             for value in data:
-                role = ctx.guild.get_role(value[0])
-                ch = ctx.guild.get_channel(value[1])
+                role = interaction.guild.get_role(value[0])
+                ch = interaction.guild.get_channel(value[1])
                 text.append(f'#{ch.name}: {role.name} | {value[2]}')
-            return await ctx.reply('```\n{}\n```'.format('\n'.join(text)),
-                                   allowed_mentions=discord.AllowedMentions.none())
+            return await interaction.response.send_message('```\n{}\n```'.format('\n'.join(text)), ephemeral=True)
 
-    @commands.group()
-    @commands.has_permissions(administrator=True)
-    async def role(self, ctx):
-        """役職の自動付与に関するコマンドです"""
-        if ctx.invoked_subcommand is None:
-            return
+    @role_group.command(name='add')
+    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.rename(role='ロール', link='招待リンク')
+    async def role_add(self, interaction, role: discord.Role, link: str):
+        """既存の招待リンクと付与するロールを紐づけます
 
-    @role.command(usage='<役職> <招待リンク/コード>')
-    @commands.has_permissions(administrator=True)
-    async def add(self, ctx, role: Optional[discord.Role], link: discord.Invite = None):
-        """既存の招待リンクと付与する役職を紐づけます"""
+        Parameters
+        -----------
+        :param role: 招待リンクに紐づけるロール
+        :param link: 紐づける招待リンク/コード
+        """
+
         if not role or not link:
-            return await ctx.reply('役職または招待リンク/コードが指定されていません',
-                                   allowed_mentions=discord.AllowedMentions.none())
-        else:
-            await ctx.reply(f'招待リンク: `{link.code}` を `{role.name}` に紐づけました。\n'
-                            f'この招待リンクを使って参加すると `{role.name}` をユーザーに付与します。\n{link.url}',
-                            allowed_mentions=discord.AllowedMentions.none())
+            return await interaction.response.send_message('役職または招待リンク/コードが指定されていません',
+                                                           ephemeral=True)
 
-            self.db.add_invite_link(ctx.guild.id, ctx.channel.id, role.id, link.code)
+        invite = discord.utils.resolve_invite(link)
 
-    @role.command(usage='<役職> [チャンネル]')
-    @commands.has_permissions(administrator=True)
-    async def set(self, ctx, role: Optional[discord.Role], ch: discord.TextChannel = None):
-        """招待リンクを作成し、付与する役職を設定します。"""
+        guild_invite = await interaction.guild.invites()
+
+        if invite.code not in [i.code for i in guild_invite]:
+            return await interaction.response.send_message('招待リンク/コードが見つかりませんでした',
+                                                           ephemeral=True)
+
+        def search_invite() -> discord.Invite:
+            for i in guild_invite:
+                if i.code == invite.code:
+                    return i
+
+        guild_data = self.db.list_invite_link(interaction.guild.id)
+        if search_invite().channel.id in guild_data:
+            return await interaction.response.send_message('既にこの招待リンクのチャンネルは設定されています', ephemeral=True)
+
+        await interaction.response.send_message(f'招待リンク: `https://discord.gg/{invite.code}` を `{role.name}` に紐づけました。\n'
+                                                f'この招待リンクを使って参加すると `{role.name}` をユーザーに付与します。'
+                                                f'\nhttps://discord.gg/{invite.code}',
+                                                ephemeral=True)
+        self.db.add_invite_link(interaction.guild.id, search_invite().channel.id, role.id, invite.code)
+
+    @role_group.command(name='set')
+    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.rename(role='ロール', ch='チャンネル')
+    async def role_set(self, interaction, role: discord.Role, ch: Optional[discord.abc.GuildChannel]):
+        """招待リンクを作成し、付与するロールを設定します。
+
+        Parameters
+        -----------
+        :param role: 招待リンクに紐づけるロール
+        :param ch: 招待リンクを作成するチャンネル
+        """
+        channel = ch if ch else interaction.channel
+
         if not role:
-            return await ctx.reply('付与する役職を指定する必要があります',
-                                   allowed_mentions=discord.AllowedMentions.none())
+            return await interaction.response.send_message('付与する役職を指定してください', ephemeral=True)
+
+        guild_data = self.db.list_invite_link(interaction.guild.id)
+        if channel.id in guild_data:
+            return await interaction.response.send_message('既にこのチャンネルには設定されています', ephemeral=True)
+
+        invite = await channel.create_invite()
+        await interaction.response.send_message(f'招待リンクを {channel.mention} に作成しました。\n'
+                                                f'この招待リンクを使って参加すると {role.name} をユーザーに付与します。\n{invite.url}',
+                                                ephemeral=True)
+
+        self.db.add_invite_link(interaction.guild.id, channel.id, role.id, invite.code)
+
+    @role_group.command(name='remove')
+    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.rename(ch='チャンネル')
+    async def role_remove(self, interaction, ch: discord.abc.GuildChannel):
+        """設定されているロールをリセットします。
+
+        Parameters
+        -----------
+        :param ch: 設定を削除するチャンネル
+        """
 
         if not ch:
-            invite = await ctx.channel.create_invite()
-            await ctx.reply('招待リンクを作成しました。\n'
-                            f'この招待リンクを使って参加すると {role.name} をユーザーに付与します。\n{invite.url}',
-                            allowed_mentions=discord.AllowedMentions.none())
+            return await interaction.response.send_message('設定を削除するチャンネルを指定してください。', ephemeral=True)
 
-            self.db.add_invite_link(ctx.guild.id, ctx.channel.id, role.id, invite.code)
-        else:
-            invite = await ch.create_invite()
-            await ctx.reply(f'招待リンクを {ch.mention} に作成しました。\n'
-                            f'この招待リンクを使って参加すると {role.name} をユーザーに付与します。\n{invite.url}',
-                            allowed_mentions=discord.AllowedMentions.none())
-
-            self.db.add_invite_link(ctx.guild.id, ch.id, role.id, invite.code)
-
-    @role.command(usage='<チャンネル>')
-    @commands.has_permissions(administrator=True)
-    async def remove(self, ctx, ch: discord.TextChannel = None):
-        """設定されている役職をリセットします"""
-        if not ch:
-            return await ctx.reply('設定を削除するチャンネルを指定する必要があります',
-                                   allowed_mentions=discord.AllowedMentions.none())
-
-        guild_data = self.db.list_invite_link(ctx.guild.id)
+        guild_data = self.db.list_invite_link(interaction.guild.id)
 
         if ch.id in guild_data:
-            self.db.del_invite_link(ctx.guild.id, ch.id)
-            await ctx.reply('設定を削除しました',
-                            allowed_mentions=discord.AllowedMentions.none())
+            self.db.del_invite_link(interaction.guild.id, ch.id)
+            return await interaction.response.send_message('設定を削除しました', ephemeral=True)
         else:
-            await ctx.reply('このチャンネルは設定されていません',
-                            allowed_mentions=discord.AllowedMentions.none())
+            return await interaction.response.send_message(f'{ch.mention} では設定されていません', ephemeral=True)
 
-    @role.command(usage='<役職>')
-    @commands.has_permissions(administrator=True)
-    async def edit(self, ctx, role: discord.Role = None):
-        """付与されている役職を変更します"""
+    @role_group.command(name='edit')
+    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.rename(role='ロール', ch='チャンネル')
+    async def role_edit(self, interaction, role: discord.Role, ch: Optional[discord.abc.GuildChannel]):
+        """付与される役職を変更します。
+
+        Parameters
+        -----------
+        :param role: 変更先のロール
+        :param ch: 設定を削除するチャンネル
+        """
+
         if not role:
-            return await ctx.reply('付与する役職を指定してください',
-                                   allowed_mentions=discord.AllowedMentions.none())
+            return await interaction.response.send_message('付与される役職を指定してください', ephemeral=True)
 
-        guild_data = self.db.list_invite_link(ctx.guild.id)
+        guild_data = self.db.list_invite_link(interaction.guild.id)
+        channel = ch if ch else interaction.channel
 
-        if ctx.channel.id not in guild_data:
-            await ctx.reply('このチャンネルには設定されていません',
-                            allowed_mentions=discord.AllowedMentions.none())
-        else:
-            before_role_id = self.db.get_invite_role(ctx.guild.id, ctx.channel.id)
-            before_role = ctx.guild.get_role(before_role_id[0])
+        if channel.id in guild_data:
+            before_role_id = self.db.get_invite_role(interaction.guild.id, channel.id)
+            before_role = interaction.guild.get_role(before_role_id[0])
             if before_role:
-                await ctx.reply(f'付与する役職を {before_role.name} から {role.name} に変更しました',
-                                allowed_mentions=discord.AllowedMentions.none())
+                return await interaction.response.send_message(f'付与する役職を {before_role.name} から {role.name} に変更しました',
+                                                               ephemeral=True)
+        else:
+            return await interaction.response.send_message(f'{channel.mention} では設定されていません', ephemeral=True)
 
 
-def setup(bot):
-    bot.add_cog(InviteRole(bot))
+async def setup(bot):
+    await bot.add_cog(InviteRole(bot))
