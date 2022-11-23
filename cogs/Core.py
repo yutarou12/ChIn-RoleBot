@@ -1,4 +1,5 @@
 import json
+import os
 import traceback
 
 from discord import AllowedMentions, Embed, Forbidden
@@ -26,6 +27,10 @@ class Core(commands.Cog):
         await self.push_link_json(invite.guild)
 
     @commands.Cog.listener()
+    async def on_guild_join(self, guild):
+        await self.push_link_json(guild)
+
+    @commands.Cog.listener()
     async def on_member_join(self, member):
 
         guild_data = self.db.list_invite_link(member.guild.id)
@@ -35,9 +40,11 @@ class Core(commands.Cog):
         data = {}
         for invite in (await member.guild.invites()):
             data[f'{invite.code}'] = f'{invite.uses}'
-
-        with open(f'./data/{member.guild.id}.json', 'r', encoding='UTF-8') as config:
-            g_data = json.load(config)
+        if os.path.exists(f'./data/{member.guild.id}.json'):
+            with open(f'./data/{member.guild.id}.json', 'r', encoding='UTF-8') as config:
+                g_data = json.load(config)
+        else:
+            return
 
         code = list(dict(data.items() - g_data.items()).items())[0]
         link_role = self.db.fetch_invite_role(member.guild.id, code)
