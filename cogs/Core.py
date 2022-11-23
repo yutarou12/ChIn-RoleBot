@@ -39,7 +39,7 @@ class Core(commands.Cog):
         with open(f'./data/{member.guild.id}.json', 'r', encoding='UTF-8') as config:
             g_data = json.load(config)
 
-        code, count = list(dict(data.items() - g_data.items()).items())[0]
+        code = list(dict(data.items() - g_data.items()).items())[0]
         link_role = self.db.fetch_invite_role(member.guild.id, code)
 
         if not link_role:
