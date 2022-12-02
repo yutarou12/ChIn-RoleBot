@@ -47,7 +47,7 @@ class Core(commands.Cog):
             return
 
         code = list(dict(data.items() - g_data.items()).items())[0]
-        link_role = self.db.fetch_invite_role(member.guild.id, code)
+        link_role = self.db.fetch_invite_role(member.guild.id, code[0])
 
         if not link_role:
             return

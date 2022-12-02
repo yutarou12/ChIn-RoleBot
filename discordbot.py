@@ -111,7 +111,7 @@ async def push_guild_invite():
         for invite in (await guild.invites()):
             data[f'{invite.code}'] = f'{invite.uses}'
         file = open(f'./data/{guild.id}.json', 'w')
-        json.dump(data, file, indent=4)
+        json.dump(data, fp=file, indent=4)
 
 
 if __name__ == '__main__':
