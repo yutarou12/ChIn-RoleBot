@@ -29,7 +29,7 @@ class InviteRole(commands.Cog):
             for value in data:
                 role = interaction.guild.get_role(value[0])
                 ch = interaction.guild.get_channel(value[1])
-                text.append(f'#{ch.name}: {role.name} | {value[2]}')
+                text.append(f'#{ch.name if ch else "None"}: {role.name if role else "None"} | {value[2]}')
             return await interaction.response.send_message('```\n{}\n```'.format('\n'.join(text)), ephemeral=True)
 
     @role_group.command(name='add')
